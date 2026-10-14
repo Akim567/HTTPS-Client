@@ -1,8 +1,10 @@
 package netdiag;
 
 import netdiag.connect.TcpConnector;
+import netdiag.decode.TextDecoder;
 import netdiag.diagnostic.DiagnosticPrinter;
 import netdiag.diagnostic.DiagnosticResult;
+import netdiag.diagnostic.JsonStringEncoder;
 import netdiag.dns.DnsResolver;
 import netdiag.http.HttpRequestBuilder;
 import netdiag.http.HttpResponse;
@@ -19,6 +21,7 @@ import java.net.NoRouteToHostException;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
+import java.nio.charset.CharacterCodingException;
 
 public class Main {
     private static final int TIMEOUT_MILLIS = 5_000;
@@ -38,11 +41,6 @@ public class Main {
             port = target.getPort();
 
             InetAddress[] addresses = DnsResolver.resolve(host);
-
-            System.out.println("Resolved IP addresses:");
-            for (InetAddress address : addresses) {
-                System.out.println(address.getHostAddress());
-            }
 
             try (Socket socket = TcpConnector.connect(
                     addresses[0],
@@ -79,16 +77,32 @@ public class Main {
                     return;
                 }
 
-                System.out.printf("HTTP version: %s%n", response.getHttpVersion());
-                System.out.printf("Status: %d %s%n",
-                        response.getStatusCode(), response.getReasonPhrase());
-                System.out.println("Headers:");
-                response.getHeaders().forEach((name, values) -> {
-                    for (String value : values) {
-                        System.out.printf("%s: %s%n", name, value);
-                    }
-                });
-                System.out.printf("Body length: %d bytes%n", response.getBody().length);
+                String httpStatus = "HTTP " + response.getStatusCode();
+                if (!response.getReasonPhrase().isBlank()) {
+                    httpStatus += " " + response.getReasonPhrase();
+                }
+
+                String bodyText;
+                try {
+                    bodyText = TextDecoder.decodeUtf8(response.getBody());
+                } catch (CharacterCodingException exception) {
+                    printError(
+                            "DECODE",
+                            "decode_error",
+                            "response body is not valid UTF-8",
+                            "check the charset declared by the server"
+                    );
+                    return;
+                }
+
+                printSuccess(
+                        "HTTP",
+                        "http_ok",
+                        "received " + httpStatus
+                                + " with a complete response body of "
+                                + response.getBody().length + " bytes"
+                );
+                System.out.println("BODY: " + JsonStringEncoder.encode(bodyText));
             }
         } catch (UnknownHostException exception) {
             printError(
@@ -137,6 +151,20 @@ public class Main {
                 classification,
                 fact,
                 next
+        ));
+    }
+
+    private static void printSuccess(
+            String stage,
+            String classification,
+            String fact
+    ) {
+        DiagnosticPrinter.print(new DiagnosticResult(
+                stage,
+                "ok",
+                classification,
+                fact,
+                ""
         ));
     }
 }
