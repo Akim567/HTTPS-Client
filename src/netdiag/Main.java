@@ -11,6 +11,8 @@ import netdiag.dns.DnsResolver;
 import netdiag.http.HttpRequestBuilder;
 import netdiag.http.HttpResponse;
 import netdiag.http.HttpResponseReader;
+import netdiag.json.JsonParseException;
+import netdiag.json.JsonValidator;
 import netdiag.url.RequestTarget;
 import netdiag.url.UrlParser;
 
@@ -124,6 +126,21 @@ public class Main {
                             "check whether the body matches the declared charset"
                     );
                     return;
+                }
+
+                if (JsonValidator.isJsonResponse(response)) {
+                    try {
+                        JsonValidator.validate(bodyText);
+                    } catch (JsonParseException exception) {
+                        printError(
+                                "PARSE",
+                                "parse_error",
+                                "response body is not valid JSON: "
+                                        + exception.getMessage(),
+                                "inspect the JSON syntax"
+                        );
+                        return;
+                    }
                 }
 
                 printSuccess(
