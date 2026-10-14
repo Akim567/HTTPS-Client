@@ -1,5 +1,7 @@
 package netdiag;
 
+import netdiag.cli.ArgumentsParser;
+import netdiag.cli.CommandLineArguments;
 import netdiag.connect.TcpConnector;
 import netdiag.decode.CharsetResolver;
 import netdiag.decode.ContentEncodingDecoder;
@@ -29,11 +31,13 @@ import java.nio.charset.Charset;
 import java.nio.charset.CharacterCodingException;
 
 public class Main {
-    private static final int TIMEOUT_MILLIS = 5_000;
-
     public static void main(String[] args) {
-        if (args.length == 0) {
-            System.err.println("Usage: netdiag <url>");
+        CommandLineArguments commandLineArguments;
+        try {
+            commandLineArguments = ArgumentsParser.parse(args);
+        } catch (IllegalArgumentException exception) {
+            System.err.printf("Invalid arguments: %s%n", exception.getMessage());
+            System.err.println(ArgumentsParser.usage());
             return;
         }
 
@@ -41,7 +45,7 @@ public class Main {
         int port = -1;
 
         try {
-            RequestTarget target = UrlParser.create(args[0]);
+            RequestTarget target = UrlParser.create(commandLineArguments.getUrl());
             host = target.getHost();
             port = target.getPort();
 
@@ -50,7 +54,7 @@ public class Main {
             try (Socket socket = TcpConnector.connect(
                     addresses[0],
                     port,
-                    TIMEOUT_MILLIS
+                    commandLineArguments.getTimeoutMillis()
             )) {
                 byte[] requestBytes =
                         HttpRequestBuilder.buildGetRequest(target);
