@@ -1,6 +1,8 @@
 package netdiag;
 
 import netdiag.connect.TcpConnector;
+import netdiag.decode.CharsetResolver;
+import netdiag.decode.ContentEncodingDecoder;
 import netdiag.decode.TextDecoder;
 import netdiag.diagnostic.DiagnosticPrinter;
 import netdiag.diagnostic.DiagnosticResult;
@@ -21,6 +23,7 @@ import java.net.NoRouteToHostException;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
+import java.nio.charset.Charset;
 import java.nio.charset.CharacterCodingException;
 
 public class Main {
@@ -70,9 +73,9 @@ public class Main {
                     printError(
                             "HTTP",
                             "framing_error",
-                            "invalid or incomplete HTTP response headers: "
+                            "invalid or incomplete HTTP response framing: "
                                     + exception.getMessage(),
-                            "inspect the response status line and headers"
+                            "inspect the status line, headers, and body framing"
                     );
                     return;
                 }
@@ -82,15 +85,43 @@ public class Main {
                     httpStatus += " " + response.getReasonPhrase();
                 }
 
+                byte[] decodedBody;
+                try {
+                    decodedBody = ContentEncodingDecoder.decode(response);
+                } catch (IOException exception) {
+                    printError(
+                            "DECODE",
+                            "decode_error",
+                            "could not decode Content-Encoding: "
+                                    + exception.getMessage(),
+                            "inspect Content-Encoding and the encoded response body"
+                    );
+                    return;
+                }
+
+                Charset charset;
+                try {
+                    charset = CharsetResolver.resolve(response);
+                } catch (IllegalArgumentException exception) {
+                    printError(
+                            "DECODE",
+                            "decode_error",
+                            "could not determine response charset: "
+                                    + exception.getMessage(),
+                            "inspect the charset parameter in Content-Type"
+                    );
+                    return;
+                }
+
                 String bodyText;
                 try {
-                    bodyText = TextDecoder.decodeUtf8(response.getBody());
+                    bodyText = TextDecoder.decode(decodedBody, charset);
                 } catch (CharacterCodingException exception) {
                     printError(
                             "DECODE",
                             "decode_error",
-                            "response body is not valid UTF-8",
-                            "check the charset declared by the server"
+                            "response body is not valid " + charset.name(),
+                            "check whether the body matches the declared charset"
                     );
                     return;
                 }
