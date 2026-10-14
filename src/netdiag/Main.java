@@ -59,7 +59,7 @@ public class Main {
                 InputStream input = socket.getInputStream();
                 HttpResponse response;
                 try {
-                    response = HttpResponseReader.readHead(input);
+                    response = HttpResponseReader.readResponse(input);
                 } catch (SocketTimeoutException exception) {
                     printError(
                             "HTTP",
@@ -88,6 +88,7 @@ public class Main {
                         System.out.printf("%s: %s%n", name, value);
                     }
                 });
+                System.out.printf("Body length: %d bytes%n", response.getBody().length);
             }
         } catch (UnknownHostException exception) {
             printError(

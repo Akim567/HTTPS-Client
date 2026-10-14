@@ -5,22 +5,24 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 /**
- * Хранит разобранную status line и заголовки HTTP-ответа.
- * Тело ответа будет добавлено на следующем этапе.
+ * Хранит разобранную status line, заголовки и тело HTTP-ответа.
  */
 public final class HttpResponse {
     private final String httpVersion;
     private final int statusCode;
     private final String reasonPhrase;
     private final Map<String, List<String>> headers;
+    private final byte[] body;
 
     public HttpResponse(
             String httpVersion,
             int statusCode,
             String reasonPhrase,
-            Map<String, List<String>> headers
+            Map<String, List<String>> headers,
+            byte[] body
     ) {
         this.httpVersion = httpVersion;
         this.statusCode = statusCode;
@@ -31,6 +33,7 @@ public final class HttpResponse {
             headersCopy.put(entry.getKey(), List.copyOf(entry.getValue()));
         }
         this.headers = Collections.unmodifiableMap(headersCopy);
+        this.body = Objects.requireNonNull(body, "body must not be null").clone();
     }
 
     public String getHttpVersion() {
@@ -55,5 +58,9 @@ public final class HttpResponse {
         }
 
         return headers.getOrDefault(name.toLowerCase(Locale.ROOT), List.of());
+    }
+
+    public byte[] getBody() {
+        return body.clone();
     }
 }
