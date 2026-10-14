@@ -1,12 +1,17 @@
 package netdiag;
 
 import netdiag.connect.TcpConnector;
+import netdiag.diagnostic.DiagnosticPrinter;
+import netdiag.diagnostic.DiagnosticResult;
 import netdiag.dns.DnsResolver;
 import netdiag.http.HttpRequestBuilder;
+import netdiag.http.HttpResponse;
+import netdiag.http.HttpResponseReader;
 import netdiag.url.RequestTarget;
 import netdiag.url.UrlParser;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.ConnectException;
 import java.net.InetAddress;
@@ -51,36 +56,86 @@ public class Main {
                 output.write(requestBytes);
                 output.flush();
 
-                System.out.println("HTTP request sent");
+                InputStream input = socket.getInputStream();
+                HttpResponse response;
+                try {
+                    response = HttpResponseReader.readHead(input);
+                } catch (SocketTimeoutException exception) {
+                    printError(
+                            "HTTP",
+                            "timeout",
+                            "timed out while waiting for HTTP response headers",
+                            "check whether the server sends a response"
+                    );
+                    return;
+                } catch (IOException exception) {
+                    printError(
+                            "HTTP",
+                            "framing_error",
+                            "invalid or incomplete HTTP response headers: "
+                                    + exception.getMessage(),
+                            "inspect the response status line and headers"
+                    );
+                    return;
+                }
+
+                System.out.printf("HTTP version: %s%n", response.getHttpVersion());
+                System.out.printf("Status: %d %s%n",
+                        response.getStatusCode(), response.getReasonPhrase());
+                System.out.println("Headers:");
+                response.getHeaders().forEach((name, values) -> {
+                    for (String value : values) {
+                        System.out.printf("%s: %s%n", name, value);
+                    }
+                });
             }
         } catch (UnknownHostException exception) {
-            System.out.println("STAGE: DNS");
-            System.out.println("RESULT: error");
-            System.out.println("CLASS: dns_error");
-            System.out.printf("FACT: host %s could not be resolved%n", host);
-            System.out.println("NEXT: check the hostname and DNS settings");
+            printError(
+                    "DNS",
+                    "dns_error",
+                    "host " + host + " could not be resolved",
+                    "check the hostname and DNS settings"
+            );
         } catch (SocketTimeoutException exception) {
-            System.out.println("STAGE: CONNECT");
-            System.out.println("RESULT: error");
-            System.out.println("CLASS: timeout");
-            System.out.printf("FACT: connection to %s:%d timed out%n", host, port);
-            System.out.println("NEXT: check that the server is reachable");
+            printError(
+                    "CONNECT",
+                    "timeout",
+                    "connection to " + host + ":" + port + " timed out",
+                    "check that the server is reachable"
+            );
         } catch (ConnectException | NoRouteToHostException exception) {
-            System.out.println("STAGE: CONNECT");
-            System.out.println("RESULT: error");
-            System.out.println("CLASS: connect_error");
-            System.out.printf("FACT: connection to %s:%d failed: %s%n",
-                    host, port, exception.getMessage());
-            System.out.println("NEXT: check that the server is running and the port is correct");
+            printError(
+                    "CONNECT",
+                    "connect_error",
+                    "connection to " + host + ":" + port + " failed: "
+                            + exception.getMessage(),
+                    "check that the server is running and the port is correct"
+            );
         } catch (IOException exception) {
-            System.out.println("STAGE: CONNECT");
-            System.out.println("RESULT: error");
-            System.out.println("CLASS: connect_error");
-            System.out.printf("FACT: connection to %s:%d failed: %s%n",
-                    host, port, exception.getMessage());
-            System.out.println("NEXT: inspect the network connection");
+            printError(
+                    "CONNECT",
+                    "connect_error",
+                    "connection to " + host + ":" + port + " failed: "
+                            + exception.getMessage(),
+                    "inspect the network connection"
+            );
         } catch (IllegalArgumentException exception) {
             System.err.printf("Invalid URL: %s%n", exception.getMessage());
         }
+    }
+
+    private static void printError(
+            String stage,
+            String classification,
+            String fact,
+            String next
+    ) {
+        DiagnosticPrinter.print(new DiagnosticResult(
+                stage,
+                "error",
+                classification,
+                fact,
+                next
+        ));
     }
 }
