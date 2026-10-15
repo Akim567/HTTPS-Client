@@ -15,9 +15,18 @@ import netdiag.http.HttpResponse;
 import netdiag.http.HttpResponseReader;
 import netdiag.json.JsonParseException;
 import netdiag.json.JsonValidator;
+import netdiag.tls.CertificateHostnameVerifier;
+import netdiag.tls.HostnameVerificationResult;
+import netdiag.tls.TlsConnector;
+import netdiag.tls.TlsContextFactory;
+import netdiag.tls.TlsFailureDescriber;
 import netdiag.url.RequestTarget;
 import netdiag.url.UrlParser;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLHandshakeException;
+import javax.net.ssl.SSLPeerUnverifiedException;
+import javax.net.ssl.SSLSocket;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -29,6 +38,9 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.nio.charset.Charset;
 import java.nio.charset.CharacterCodingException;
+import java.nio.file.Path;
+import java.security.GeneralSecurityException;
+import java.security.cert.CertificateParsingException;
 
 public class Main {
     public static void main(String[] args) {
@@ -49,13 +61,90 @@ public class Main {
             host = target.getHost();
             port = target.getPort();
 
+            Path caCertificatePath = commandLineArguments.getCaCertificatePath();
+            if (target.getScheme().equals("https") && caCertificatePath == null) {
+                System.err.println("Invalid arguments: --ca is required for HTTPS");
+                System.err.println(ArgumentsParser.usage());
+                return;
+            }
+
             InetAddress[] addresses = DnsResolver.resolve(host);
 
-            try (Socket socket = TcpConnector.connect(
+            try (Socket tcpSocket = TcpConnector.connect(
                     addresses[0],
                     port,
                     commandLineArguments.getTimeoutMillis()
             )) {
+                Socket socket = tcpSocket;
+
+                if (target.getScheme().equals("https")) {
+                    try {
+                        SSLContext sslContext = TlsContextFactory.create(caCertificatePath);
+                        SSLSocket tlsSocket = TlsConnector.connect(
+                                tcpSocket,
+                                host,
+                                port,
+                                commandLineArguments.getTimeoutMillis(),
+                                sslContext
+                        );
+
+                        HostnameVerificationResult hostnameResult =
+                                CertificateHostnameVerifier.verify(
+                                        host,
+                                        tlsSocket.getSession()
+                                );
+                        if (!hostnameResult.isMatched()) {
+                            printError(
+                                    "TLS",
+                                    "cert_invalid",
+                                    "requested host " + host
+                                            + " does not match certificate names "
+                                            + hostnameResult.getCertificateNames(),
+                                    "use a hostname listed in the server certificate"
+                            );
+                            return;
+                        }
+
+                        socket = tlsSocket;
+                    } catch (SocketTimeoutException exception) {
+                        printError(
+                                "TLS",
+                                "timeout",
+                                "TLS handshake with " + host + ":" + port + " timed out",
+                                "check whether the server completes the TLS handshake"
+                        );
+                        return;
+                    } catch (SSLHandshakeException exception) {
+                        printError(
+                                "TLS",
+                                "tls_error",
+                                "TLS handshake failed: "
+                                        + TlsFailureDescriber.describe(exception),
+                                "inspect the certificate trust chain and validity period"
+                        );
+                        return;
+                    } catch (SSLPeerUnverifiedException
+                             | CertificateParsingException exception) {
+                        printError(
+                                "TLS",
+                                "cert_invalid",
+                                "could not verify requested host " + host + ": "
+                                        + exception.getMessage(),
+                                "inspect the names in the server certificate"
+                        );
+                        return;
+                    } catch (GeneralSecurityException | IOException exception) {
+                        printError(
+                                "TLS",
+                                "tls_error",
+                                "could not establish TLS: "
+                                        + TlsFailureDescriber.describe(exception),
+                                "check the CA certificate and TLS configuration"
+                        );
+                        return;
+                    }
+                }
+
                 byte[] requestBytes =
                         HttpRequestBuilder.buildGetRequest(target);
 
